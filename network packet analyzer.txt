@@ -1,0 +1,81 @@
+#include <stdio.h>
+#include <pcap.h>
+#include <arpa/inet.h>
+#include <netinet/ip.h> // Defines the IP header
+#include <netinet/ip6.h> // Defines the IPv6 header
+#include <netinet/tcp.h> // Defines the TCP header
+#include <netinet/ether.h> // Defines the Ethernet header
+
+// Callback function to handle captured packets
+void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u_char *packet) {
+    // Ethernet header
+    struct ether_header *eth_header = (struct ether_header *) packet;
+    printf("\nEthernet Header:\n");
+    printf("Destination MAC: %s\n", ether_ntoa((struct ether_addr *)eth_header->ether_dhost));
+    printf("Source MAC: %s\n", ether_ntoa((struct ether_addr *)eth_header->ether_shost));
+
+    // Check if the packet is an IP or ARP or other types
+    u_short ether_type = ntohs(eth_header->ether_type);
+    printf("EtherType: 0x%04x\n", ether_type);
+
+    // If the EtherType is IP (0x0800)
+    if (ether_type == 0x0800) {
+        struct ip *ip_header = (struct ip *)(packet + sizeof(struct ether_header));
+        printf("\nIPv4 Header:\n");
+        printf("IP Source: %s\n", inet_ntoa(ip_header->ip_src));
+        printf("IP Destination: %s\n", inet_ntoa(ip_header->ip_dst));
+
+        // Check for TCP or UDP or others
+        if (ip_header->ip_p == IPPROTO_TCP) {
+            struct tcphdr *tcp_header = (struct tcphdr *)(packet + sizeof(struct ether_header) + sizeof(struct ip));
+            printf("\nTCP Header:\n");
+            printf("Source Port: %d\n", ntohs(tcp_header->th_sport));
+            printf("Destination Port: %d\n", ntohs(tcp_header->th_dport));
+        }
+    }
+    // If the EtherType is IPv6 (0x86DD)
+    else if (ether_type == 0x86dd) {
+        struct ip6_hdr *ip6_header = (struct ip6_hdr *)(packet + sizeof(struct ether_header));
+        char src_ip[INET6_ADDRSTRLEN];
+        char dst_ip[INET6_ADDRSTRLEN];
+        inet_ntop(AF_INET6, &ip6_header->ip6_src, src_ip, INET6_ADDRSTRLEN);
+        inet_ntop(AF_INET6, &ip6_header->ip6_dst, dst_ip, INET6_ADDRSTRLEN);
+        
+        printf("\nIPv6 Header:\n");
+        printf("Source IP: %s\n", src_ip);
+        printf("Destination IP: %s\n", dst_ip);
+    }
+
+    printf("\nPacket Length: %d bytes\n", pkthdr->len);
+    printf("------------------------------------------------\n");
+}
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle;
+    char *dev;
+
+    // Find a device to capture packets from
+    dev = pcap_lookupdev(errbuf);
+    if (dev == NULL) {
+        fprintf(stderr, "Error finding device: %s\n", errbuf);
+        return 1;
+    }
+
+    // Open the device for capturing packets
+    handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening device %s: %s\n", dev, errbuf);
+        return 1;
+    }
+
+    // Start capturing packets in a loop
+    if (pcap_loop(handle, 0, packet_handler, NULL) < 0) {
+        fprintf(stderr, "Error capturing packets: %s\n", pcap_geterr(handle));
+        return 1;
+    }
+
+    // Close the pcap handle
+    pcap_close(handle);
+    return 0;
+}
